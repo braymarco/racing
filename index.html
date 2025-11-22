@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Carrera WebSocket</title>
+    <style>
+        body {
+            background: #222;
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        /* Contenedor relativo para poder poner la caja de ganador encima */
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 50px rgba(0,0,0,0.8);
+        }
+
+        canvas {
+            background: #333;
+            display: block;
+            border-radius: 4px;
+        }
+
+        .winner-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 200, 0, 0.95);
+            color: white;
+            padding: 20px 50px;
+            font-size: 40px;
+            font-weight: bold;
+            border-radius: 15px;
+            display: none; /* Se activa con JS */
+            border: 5px solid #fff;
+            text-shadow: 2px 2px 4px #000;
+            z-index: 100;
+        }
+
+        .waiting-text {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: rgba(255,255,255,0.5);
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div class="waiting-text">Esperando jugadores... (/add_car/pais)</div>
+    <div class="winner-box" id="winnerBox"></div>
+    <canvas id="game" width="1280" height="720"></canvas>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// ==========================================
+// CONFIGURACIÓN
+// ==========================================
+let finish_line = 1150;
+let cars = {};          // { "peru": {pos: 10, img: ImageObject} }
+let carNames = [];      // ["argentina", "peru"] para mantener el orden de carriles
+start_pos = 50
+// Conectar al WebSocket
+let ws = new WebSocket("ws://localhost:8000/ws");
+
+ws.onmessage = (event) => {
+    let msg = JSON.parse(event.data);
+
+    // 1. LLEGA LA LISTA DE JUGADORES (Al agregar o conectar)
+    if (msg.type === "players_update") {
+        updateCarList(msg.data);
+    }
+    // 2. ACTUALIZACIÓN DE MOVIMIENTO (Durante la carrera)
+    else if (msg.type === "positions") {
+        for (let name in msg.data) {
+            if (cars[name]) {
+                cars[name].pos = msg.data[name];
+            }
+        }
+    }
+    // 3. GANADOR
+    else if (msg.type === "winner") {
+        showWinner(msg.data);
+    }
+};
+
+// ==========================================
+// GESTIÓN DE JUGADORES
+// ==========================================
+function updateCarList(serverList) {
+    carNames = serverList;
+
+    // Ocultar cartel de ganador si se reinicia la lista
+    if (carNames.length === 0) {
+        document.getElementById("winnerBox").style.display = "none";
+    }
+
+    // Cargar sprites si no existen
+    carNames.forEach(name => {
+        if (!cars[name]) {
+            let img = new Image();
+            // Asegúrate de que las imágenes estén en la carpeta /sprites/
+            img.src = `sprites/${name}.png`;
+            cars[name] = { pos: start_pos, img: img };
+        }
+    });
+
+    // Limpiar carros viejos
+    for (let name in cars) {
+        if (!carNames.includes(name)) delete cars[name];
+    }
+}
+
+function showWinner(name) {
+    const box = document.getElementById("winnerBox");
+    box.innerHTML = `🏆 GANADOR: ${name.toUpperCase()} 🏆`;
+    box.style.display = "block";
+}
+
+// ==========================================
+// DIBUJAR (LOOP)
+// ==========================================
+function draw() {
+    // Limpiar pantalla
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 1. Dibujar Pista (Fondo y Líneas)
+    drawTrack();
+
+    // 2. Dibujar Meta
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 10;
+    ctx.setLineDash([20, 20]); // Línea punteada tipo ajedrez
+    ctx.beginPath();
+    ctx.moveTo(finish_line, 0);
+    ctx.lineTo(finish_line, canvas.height);
+    ctx.stroke();
+    ctx.setLineDash([]); // Resetear línea
+
+    // 3. Dibujar Carros
+    if (carNames.length > 0) {
+        // Calcular altura de cada carril dinámicamente
+        let laneHeight = canvas.height / carNames.length;
+
+        carNames.forEach((name, index) => {
+            let car = cars[name];
+            if (!car) return;
+
+            // Calcular Y: Centro del carril
+            let y = (laneHeight * index) + (laneHeight / 2);
+            let x = car.pos;
+
+            drawCar(ctx, car.img, x, y, name);
+        });
+    }
+
+    requestAnimationFrame(draw);
+}
+
+function drawTrack() {
+    // Fondo asfalto
+    ctx.fillStyle = "#333";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Líneas divisorias de carriles
+    if (carNames.length > 1) {
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([40, 30]);
+
+        let laneHeight = canvas.height / carNames.length;
+
+        for (let i = 1; i < carNames.length; i++) {
+            let y = laneHeight * i;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+    }
+}
+
+function drawCar(ctx, img, x, y, name) {
+    ctx.save();
+
+    // 1. Trasladar al centro del carro
+    ctx.translate(x, y);
+
+    // 2. DIBUJAR NOMBRE (Antes de rotar para que quede derecho)
+    ctx.fillStyle = "white";
+    ctx.font = "bold 14px Arial";
+
+    // CORRECCIÓN DE POSICIÓN DE TEXTO:
+    // Si el carro está muy al inicio (x < 60), alineamos el texto a la izquierda
+    // para que no se corte. Si no, lo centramos.
+    if (x < 60) {
+        ctx.textAlign = "left";
+        ctx.fillText(name.toUpperCase(), -20, -35);
+    } else {
+        ctx.textAlign = "center";
+        ctx.fillText(name.toUpperCase(), 0, -35);
+    }
+
+    // 3. ROTACIÓN (Girar 180 grados más)
+    // Antes era 90, ahora es 270 (que es lo mismo que -90)
+    ctx.rotate(270 * Math.PI / 180);
+
+    // 4. DIBUJAR IMAGEN
+    let w = 50;
+    let h = 90;
+
+    try {
+        // Dibujamos centrado en el punto de rotación
+        ctx.drawImage(img, -w/2, -h/2, w, h);
+    } catch (e) {
+        ctx.fillStyle = "red";
+        ctx.fillRect(-25, -45, 50, 90);
+    }
+
+    ctx.restore();
+}
+
+// Iniciar animación
+draw();
+
+</script>
+
+</body>
+</html>
