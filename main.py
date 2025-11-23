@@ -21,10 +21,11 @@ app.add_middleware(
 # CONFIGURACIÓN
 # ============================
 canvas_width = 1280
+canvas_height = 720
 sprite_width = 50
-start_pos = 50
+start_pos = 650  # Y coordinate near bottom
 
-finish_line = canvas_width - sprite_width - start_pos
+finish_line = 50 # Y coordinate near top
 
 all_cars = [
     "argentina", "bolivia", "brasil", "chile", "colombia", "costa_rica", "cuba",
@@ -59,7 +60,7 @@ clients = set()
 # ============================
 # CONSTANTES FÍSICAS
 # ============================
-finish_line_x = 1150  # Coordenada X visual de la línea de meta
+finish_line_y = 50    # Coordenada Y visual de la línea de meta
 car_length = 90       # Largo visual aproximado del carro en px
 car_nose_offset = car_length / 2  # Distancia del centro a la punta
 
@@ -183,7 +184,9 @@ async def race_loop():
         # Actualizar física (Mover carros)
         for c in game_state.cars.values():
             # Aumentamos la velocidad base para que no sea tan lento
-            c["pos"] += c["vel"] + random.randint(1, 20) / 10
+            # En carrera vertical hacia arriba, la posición Y disminuye
+            move_amount = c["vel"] + random.randint(1, 20) / 10
+            c["pos"] -= move_amount
             c["vel"] = max(1, c["vel"] - 0.05)
 
         # Detectar ganador usando la PUNTA del carro
@@ -193,10 +196,10 @@ async def race_loop():
         for name, c in game_state.cars.items():
             current_positions[name] = c["pos"]
 
-            # CALCULO CLAVE: Posición del centro + mitad del largo = Nariz
-            nose_position = c["pos"] + car_nose_offset
+            # CALCULO CLAVE: Posición del centro - mitad del largo = Nariz (hacia arriba)
+            nose_position = c["pos"] - car_nose_offset
 
-            if nose_position >= finish_line_x:
+            if nose_position <= finish_line_y:
                 winner = name
                 break
 

@@ -172,8 +172,8 @@ let cars = {};          // Visual objects
 let carNames = [];      // Order of lanes
 let confirmedCars = [];
 let votes = {};
-let finish_line = 1150;
-let start_pos = 50;
+let finish_line = 50;
+let start_pos = 650;
 let gamePhase = "VOTING";
 
 // Assets
@@ -308,6 +308,7 @@ function draw() {
         drawTrack();
         drawFinishLine();
         drawCars();
+        drawCommands();
     } else {
          // Optional: Draw background for voting
          ctx.fillStyle = "#222";
@@ -326,13 +327,13 @@ function drawTrack() {
         ctx.lineWidth = 2;
         ctx.setLineDash([40, 30]);
 
-        let laneHeight = canvas.height / carNames.length;
+        let laneWidth = canvas.width / carNames.length;
 
         for (let i = 1; i < carNames.length; i++) {
-            let y = laneHeight * i;
+            let x = laneWidth * i;
             ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(canvas.width, y);
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
             ctx.stroke();
         }
         ctx.setLineDash([]);
@@ -344,25 +345,48 @@ function drawFinishLine() {
     ctx.lineWidth = 10;
     ctx.setLineDash([20, 20]);
     ctx.beginPath();
-    ctx.moveTo(finish_line, 0);
-    ctx.lineTo(finish_line, canvas.height);
+    ctx.moveTo(0, finish_line);
+    ctx.lineTo(canvas.width, finish_line);
     ctx.stroke();
     ctx.setLineDash([]);
 }
 
 function drawCars() {
     if (carNames.length > 0) {
-        let laneHeight = canvas.height / carNames.length;
+        let laneWidth = canvas.width / carNames.length;
 
         carNames.forEach((name, index) => {
             let car = cars[name];
             if (!car) return;
 
-            let y = (laneHeight * index) + (laneHeight / 2);
-            let x = car.pos;
+            let x = (laneWidth * index) + (laneWidth / 2);
+            let y = car.pos;
 
             drawCarSprite(ctx, car.img, x, y, name);
         });
+    }
+}
+
+function drawCommands() {
+    if (carNames.length > 0) {
+        let laneWidth = canvas.width / carNames.length;
+        ctx.save();
+        ctx.font = "bold 16px Arial";
+        ctx.textAlign = "center";
+
+        carNames.forEach((name, index) => {
+            let x = (laneWidth * index) + (laneWidth / 2);
+            // Draw tag at the top of the lane
+
+            // Background for tag
+            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+            ctx.fillRect(x - 60, 5, 120, 30);
+
+            // Text
+            ctx.fillStyle = "#00ff00";
+            ctx.fillText(`!vote ${name}`, x, 25);
+        });
+        ctx.restore();
     }
 }
 
@@ -372,14 +396,15 @@ function drawCarSprite(ctx, img, x, y, name) {
 
     ctx.fillStyle = "white";
     ctx.font = "bold 14px Arial";
-    if (x < 60) {
-        ctx.textAlign = "left";
-        ctx.fillText(name.toUpperCase(), -20, -35);
-    } else {
-        ctx.textAlign = "center";
-        ctx.fillText(name.toUpperCase(), 0, -35);
-    }
+    // Name below the car or above? Since moving up, maybe below (higher Y)
+    ctx.textAlign = "center";
+    ctx.fillText(name.toUpperCase(), 0, 60);
 
+    // Rotate to face UP (0 degrees or -90 depending on source)
+    // Original code rotated 270 (facing UP assuming source faces RIGHT)
+    // If source faces RIGHT, 270 (-90) makes it face UP.
+    // So the rotation logic might be correct already if we want it facing UP.
+    // Let's verify. 270 degrees = 3/4 turn. Right -> Down -> Left -> Up. Correct.
     ctx.rotate(270 * Math.PI / 180);
 
     let w = 50;
