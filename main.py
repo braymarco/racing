@@ -168,6 +168,11 @@ app.mount("/sprites", StaticFiles(directory="sprites"), name="sprites")
 async def get():
     return FileResponse("index.html")
 
+# Serve admin panel
+@app.get("/admin")
+async def get_admin():
+    return FileResponse("admin.html")
+
 # ============================
 # BUCLE DE LA CARRERA
 # ============================
