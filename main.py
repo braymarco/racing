@@ -1,9 +1,12 @@
 import asyncio
 import random
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from starlette.responses import JSONResponse
+from enum import Enum
 
 app = FastAPI()
 
@@ -19,10 +22,7 @@ app.add_middleware(
 # ============================
 canvas_width = 1280
 sprite_width = 50
-start_pos = 50             # <--- CAMBIO AQUÍ (Antes era 25)
-                           # 70px asegura que la cola del auto (45px) entre sobrada.
-
-# meta calculada o fija
+start_pos = 50
 
 finish_line = canvas_width - sprite_width - start_pos
 
@@ -32,12 +32,29 @@ all_cars = [
     "panama", "paraguay", "peru", "uruguay", "usa", "venezuela"
 ]
 
+VOTES_TO_QUALIFY = 5  # y votes
+MAX_RACERS = 4        # x cars
+
 # ============================
 # ESTADO
 # ============================
-cars = {}  # { "argentina": { "pos": 25, "vel": 1 } }
+class GamePhase(str, Enum):
+    VOTING = "VOTING"
+    WAITING = "WAITING"
+    COUNTDOWN = "COUNTDOWN"
+    RACING = "RACING"
+    FINISHED = "FINISHED"
+
+class GameState:
+    def __init__(self):
+        self.phase = GamePhase.VOTING
+        self.cars = {}  # { "argentina": { "pos": 25, "vel": 1 } }
+        self.votes = {car: 0 for car in all_cars} # { "argentina": 0, ... }
+        self.confirmed_cars = [] # ["argentina", "brasil"]
+        self.winner = None
+
+game_state = GameState()
 clients = set()
-race_running = False
 
 # ============================
 # CONSTANTES FÍSICAS
@@ -45,6 +62,7 @@ race_running = False
 finish_line_x = 1150  # Coordenada X visual de la línea de meta
 car_length = 90       # Largo visual aproximado del carro en px
 car_nose_offset = car_length / 2  # Distancia del centro a la punta
+
 # ============================
 # WEBSOCKET BROADCAST
 # ============================
@@ -59,71 +77,106 @@ async def broadcast(message: dict):
     for ws in dead:
         clients.remove(ws)
 
+async def broadcast_state():
+    """Broadcasts the full current state to all clients"""
+    state_msg = {
+        "type": "state_update",
+        "phase": game_state.phase,
+        "cars": list(game_state.cars.keys()), # Only active cars
+        "confirmed_cars": game_state.confirmed_cars,
+        "votes": game_state.votes,
+        "winner": game_state.winner
+    }
+    await broadcast(state_msg)
+
 
 # ============================
-# API: AGREGAR CARRO
+# API
 # ============================
-@app.get("/add_car/{car}")
-async def add_car(car: str):
-    global cars, race_running
 
-    # Si intentan agregar un carro mientras corren, reiniciamos lógica (opcional)
-    if race_running:
-        return {"error": "La carrera ya está en curso"}
+@app.get("/vote/{car}")
+async def vote_car(car: str):
+    if game_state.phase != GamePhase.VOTING:
+        return {"error": "Voting is closed"}
 
     if car not in all_cars:
-        return {"error": f"El carro {car} no existe en la lista de assets"}
+        return {"error": f"Car {car} does not exist"}
 
-    if car in cars:
-        return {"error": f"{car} ya está en la pista"}
+    if car in game_state.confirmed_cars:
+        return {"message": f"{car} is already confirmed"}
 
-    # Agregar carro
-    cars[car] = {"pos": start_pos, "vel": 1}
+    game_state.votes[car] += 1
 
-    # AVISAR AL FRONTEND INMEDIATAMENTE
-    await broadcast({
-        "type": "players_update",
-        "data": list(cars.keys())
-    })
+    # Check if qualified
+    if game_state.votes[car] >= VOTES_TO_QUALIFY:
+        if car not in game_state.confirmed_cars:
+            game_state.confirmed_cars.append(car)
+            # Add to cars dict for racing logic later
+            game_state.cars[car] = {"pos": start_pos, "vel": 1}
 
-    return {
-        "status": "added",
-        "cars": list(cars.keys())
-    }
+            # Check if we have enough cars
+            if len(game_state.confirmed_cars) >= MAX_RACERS:
+                asyncio.create_task(start_sequence())
 
+    await broadcast_state()
+    return {"status": "voted", "votes": game_state.votes[car], "confirmed": car in game_state.confirmed_cars}
 
-@app.get("/start")
-async def start():
-    global race_running
-    if len(cars) < 2:  # Mínimo 2 para que sea divertido
-        return {"error": "Se necesitan al menos 2 carros"}
+async def start_sequence():
+    global game_state
 
-    race_running = True
+    # Transition to WAITING
+    game_state.phase = GamePhase.WAITING
+    # Clear unconfirmed cars from votes/display logic implicitly by only sending confirmed_cars in state
+    await broadcast_state()
+
+    await asyncio.sleep(5)
+
+    # Transition to COUNTDOWN
+    game_state.phase = GamePhase.COUNTDOWN
+    await broadcast_state()
+
+    # Countdown 5, 4, 3, 2, 1
+    for i in range(5, 0, -1):
+        await broadcast({"type": "countdown", "value": i})
+        await asyncio.sleep(1)
+
+    await broadcast({"type": "countdown", "value": "GO!"})
+
+    # Start Racing
+    game_state.phase = GamePhase.RACING
+    await broadcast_state()
     asyncio.create_task(race_loop())
-    return {"status": "started"}
 
+@app.get("/hard_reset")
+async def hard_reset():
+    global game_state
+    game_state = GameState()
+    await broadcast_state()
+    return {"status": "hard_reset"}
 
+# Keep old reset for compatibility if needed, but alias to hard_reset or partial?
+# The requirement says "clean the entire game and allow starting new voting".
 @app.get("/reset")
 async def reset():
-    global cars, race_running
-    cars = {}
-    race_running = False
-    # Avisar al front que limpie la pantalla
-    await broadcast({"type": "players_update", "data": []})
-    return {"status": "reset"}
+    return await hard_reset()
 
+# Serve static files (sprites)
+app.mount("/sprites", StaticFiles(directory="sprites"), name="sprites")
+
+# Serve index.html
+@app.get("/")
+async def get():
+    return FileResponse("index.html")
 
 # ============================
 # BUCLE DE LA CARRERA
 # ============================
 async def race_loop():
-    global race_running
-
-    while race_running:
+    while game_state.phase == GamePhase.RACING:
         await asyncio.sleep(0.05)  # 20 FPS
 
         # Actualizar física (Mover carros)
-        for c in cars.values():
+        for c in game_state.cars.values():
             # Aumentamos la velocidad base para que no sea tan lento
             c["pos"] += c["vel"] + random.randint(1, 20) / 10
             c["vel"] = max(1, c["vel"] - 0.05)
@@ -132,7 +185,7 @@ async def race_loop():
         current_positions = {}
         winner = None
 
-        for name, c in cars.items():
+        for name, c in game_state.cars.items():
             current_positions[name] = c["pos"]
 
             # CALCULO CLAVE: Posición del centro + mitad del largo = Nariz
@@ -140,44 +193,23 @@ async def race_loop():
 
             if nose_position >= finish_line_x:
                 winner = name
-                # Detenemos aquí para que gane el que cruzó primero en este frame
                 break
 
-                # Enviar actualización
         await broadcast({
             "type": "positions",
             "data": current_positions
         })
 
         if winner:
-            race_running = False
+            game_state.phase = GamePhase.FINISHED
+            game_state.winner = winner
             await broadcast({
                 "type": "winner",
                 "data": winner
             })
+            await broadcast_state() # Ensure state reflects finished
             return  # Salir del loop
 
-@app.get("/reset_car/{car_name}")
-async def reset_single_car(car_name: str):
-
-    if car_name not in cars:
-        return JSONResponse(
-            {"status": "error", "message": "Car does not exist"},
-            status_code=404
-        )
-
-    # Reiniciar valores
-    cars[car_name]["pos"] = start_pos
-    cars[car_name]["vel"] = 5
-    cars[car_name]["nitro"] = False
-
-    # Notificar al frontend
-    await broadcast({
-        "type": "reset_car",
-        "car": car_name
-    })
-
-    return {"status": "ok", "message": f"Car '{car_name}' reset"}
 # ============================
 # CONEXIÓN WS
 # ============================
@@ -186,10 +218,14 @@ async def ws_connection(ws: WebSocket):
     await ws.accept()
     clients.add(ws)
 
-    # Al conectar, enviar el estado actual por si ya había carros
+    # Send initial state
     await ws.send_json({
-        "type": "players_update",
-        "data": list(cars.keys())
+        "type": "state_update",
+        "phase": game_state.phase,
+        "cars": list(game_state.cars.keys()),
+        "confirmed_cars": game_state.confirmed_cars,
+        "votes": game_state.votes,
+        "winner": game_state.winner
     })
 
     try:
