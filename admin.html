@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Control Panel - Racing Game</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #f0f0f0;
+            padding: 20px;
+            text-align: center;
+        }
+        h1 { color: #333; }
+        .control-group {
+            margin-bottom: 30px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 4px;
+            margin: 5px;
+            transition: background 0.2s;
+        }
+        button:hover { opacity: 0.8; }
+
+        .btn-reset { background: #ff4444; color: white; font-weight: bold; }
+        .btn-vote { background: #007bff; color: white; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+
+        .status-log {
+            margin-top: 20px;
+            padding: 10px;
+            background: #333;
+            color: #0f0;
+            font-family: monospace;
+            height: 100px;
+            overflow-y: auto;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🏎️ Admin Control Panel</h1>
+
+    <div class="control-group">
+        <h2>Global Controls</h2>
+        <button class="btn-reset" onclick="resetGame()">⚠️ HARD RESET GAME</button>
+    </div>
+
+    <div class="control-group">
+        <h2>Cast Votes (Simulate Users)</h2>
+        <p>Click to add 1 vote to a car.</p>
+        <div class="grid" id="voteGrid">
+            <!-- Buttons injected by JS -->
+        </div>
+    </div>
+
+    <div class="status-log" id="log">Log initialized...</div>
+
+    <script>
+        const cars = [
+            "argentina", "bolivia", "brasil", "chile", "colombia", "costa_rica", "cuba",
+            "ecuador", "el_salvador", "guatemala", "honduras", "mexico", "nicaragua",
+            "panama", "paraguay", "peru", "uruguay", "usa", "venezuela"
+        ];
+
+        const logEl = document.getElementById('log');
+
+        function log(msg) {
+            const div = document.createElement('div');
+            div.textContent = `> ${msg}`;
+            logEl.prepend(div);
+        }
+
+        function initGrid() {
+            const grid = document.getElementById('voteGrid');
+            cars.forEach(car => {
+                const btn = document.createElement('button');
+                btn.className = 'btn-vote';
+                btn.textContent = `Vote ${car.toUpperCase()}`;
+                btn.onclick = () => vote(car);
+                grid.appendChild(btn);
+            });
+        }
+
+        async function vote(car) {
+            try {
+                const res = await fetch(`/vote/${car}`);
+                const data = await res.json();
+                if (data.error) {
+                    log(`Error voting ${car}: ${data.error}`);
+                } else if (data.message) {
+                     log(`Info: ${data.message}`);
+                } else {
+                    log(`Voted ${car}. Total: ${data.votes}. Confirmed: ${data.confirmed}`);
+                }
+            } catch (e) {
+                log(`Network error: ${e}`);
+            }
+        }
+
+        async function resetGame() {
+            if(!confirm("Are you sure you want to reset the entire game?")) return;
+
+            try {
+                const res = await fetch('/hard_reset');
+                const data = await res.json();
+                log(`Game Reset: ${data.status}`);
+            } catch (e) {
+                log(`Network error: ${e}`);
+            }
+        }
+
+        initGrid();
+    </script>
+</body>
+</html>

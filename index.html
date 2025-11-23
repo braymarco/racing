@@ -13,11 +13,13 @@
             justify-content: center;
             align-items: center;
             height: 100vh;
+            color: white;
         }
 
-        /* Contenedor relativo para poder poner la caja de ganador encima */
         #game-container {
             position: relative;
+            width: 1280px;
+            height: 720px;
             box-shadow: 0 0 50px rgba(0,0,0,0.8);
         }
 
@@ -27,154 +29,298 @@
             border-radius: 4px;
         }
 
-        .winner-box {
+        .overlay {
             position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0,0,0,0.85);
+            z-index: 10;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Voting Screen */
+        .voting-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 20px;
+            padding: 20px;
+            width: 90%;
+        }
+        .car-card {
+            background: #444;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            position: relative;
+        }
+        .car-card img {
+            width: 50px;
+            height: auto;
+            display: block;
+            margin: 0 auto 10px;
+        }
+        .vote-count {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .confirmed-badge {
+            background: #00cc00;
+            color: white;
+            padding: 5px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-top: 5px;
+            display: none;
+        }
+        .car-card.confirmed .confirmed-badge {
+            display: block;
+        }
+        .car-card.confirmed {
+            border: 2px solid #00cc00;
+        }
+
+        /* Waiting Screen */
+        .waiting-msg {
+            font-size: 48px;
+            text-align: center;
+            color: #fff;
+            text-transform: uppercase;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        /* Countdown */
+        .countdown-text {
+            font-size: 150px;
+            font-weight: bold;
+            color: yellow;
+            text-shadow: 4px 4px 0 #000;
+        }
+
+        /* Winner */
+        .winner-box {
             background: rgba(0, 200, 0, 0.95);
             color: white;
             padding: 20px 50px;
             font-size: 40px;
             font-weight: bold;
             border-radius: 15px;
-            display: none; /* Se activa con JS */
             border: 5px solid #fff;
             text-shadow: 2px 2px 4px #000;
-            z-index: 100;
         }
 
-        .waiting-text {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            color: rgba(255,255,255,0.5);
-            font-size: 14px;
-        }
     </style>
 </head>
 <body>
 
 <div id="game-container">
-    <div class="waiting-text">Esperando jugadores... (/add_car/pais)</div>
-    <div class="winner-box" id="winnerBox"></div>
     <canvas id="game" width="1280" height="720"></canvas>
+
+    <!-- Voting Screen -->
+    <div id="voting-screen" class="overlay">
+        <h1>Elige tu corredor</h1>
+        <div class="voting-grid" id="votingGrid"></div>
+    </div>
+
+    <!-- Waiting Screen -->
+    <div id="waiting-screen" class="overlay hidden">
+        <div class="waiting-msg">EN UN MOMENTO COMENZAMOS LA CARRERA</div>
+    </div>
+
+    <!-- Countdown Screen (Transparent overlay) -->
+    <div id="countdown-screen" class="overlay hidden" style="background: rgba(0,0,0,0.3);">
+        <div class="countdown-text" id="countdownDisplay">5</div>
+    </div>
+
+    <!-- Winner Screen -->
+    <div id="winner-screen" class="overlay hidden" style="background: rgba(0,0,0,0.5);">
+        <div class="winner-box" id="winnerBox"></div>
+    </div>
 </div>
 
 <script>
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-// ==========================================
-// CONFIGURACIÓN
-// ==========================================
+// Elements
+const screens = {
+    voting: document.getElementById("voting-screen"),
+    waiting: document.getElementById("waiting-screen"),
+    countdown: document.getElementById("countdown-screen"),
+    winner: document.getElementById("winner-screen")
+};
+const votingGrid = document.getElementById("votingGrid");
+const countdownDisplay = document.getElementById("countdownDisplay");
+const winnerBox = document.getElementById("winnerBox");
+
+// Game State
+let cars = {};          // Visual objects
+let carNames = [];      // Order of lanes
+let confirmedCars = [];
+let votes = {};
 let finish_line = 1150;
-let cars = {};          // { "peru": {pos: 10, img: ImageObject} }
-let carNames = [];      // ["argentina", "peru"] para mantener el orden de carriles
-start_pos = 50
-// Conectar al WebSocket
+let start_pos = 50;
+let gamePhase = "VOTING";
+
+// Assets
+const allCarNames = [
+    "argentina", "bolivia", "brasil", "chile", "colombia", "costa_rica", "cuba",
+    "ecuador", "el_salvador", "guatemala", "honduras", "mexico", "nicaragua",
+    "panama", "paraguay", "peru", "uruguay", "usa", "venezuela"
+];
+
+// Initialize Voting Grid
+allCarNames.forEach(name => {
+    const card = document.createElement("div");
+    card.className = "car-card";
+    card.id = `card-${name}`;
+    card.innerHTML = `
+        <img src="sprites/${name}.png" alt="${name}">
+        <div>${name.toUpperCase()}</div>
+        <div class="vote-count" id="votes-${name}">0</div>
+        <div class="confirmed-badge">CONFIRMADO PARA LA CARRERA</div>
+    `;
+    votingGrid.appendChild(card);
+});
+
+
+// WebSocket
 let ws = new WebSocket("ws://localhost:8000/ws");
 
 ws.onmessage = (event) => {
     let msg = JSON.parse(event.data);
 
-    // 1. LLEGA LA LISTA DE JUGADORES (Al agregar o conectar)
-    if (msg.type === "players_update") {
-        updateCarList(msg.data);
-    }
-    // 2. ACTUALIZACIÓN DE MOVIMIENTO (Durante la carrera)
-    else if (msg.type === "positions") {
-        for (let name in msg.data) {
-            if (cars[name]) {
-                cars[name].pos = msg.data[name];
-            }
-        }
-    }
-    // 3. GANADOR
-    else if (msg.type === "winner") {
+    if (msg.type === "state_update") {
+        handleStateUpdate(msg);
+    } else if (msg.type === "positions") {
+        updatePositions(msg.data);
+    } else if (msg.type === "countdown") {
+        handleCountdown(msg.value);
+    } else if (msg.type === "winner") {
         showWinner(msg.data);
     }
 };
 
-// ==========================================
-// GESTIÓN DE JUGADORES
-// ==========================================
-function updateCarList(serverList) {
-    carNames = serverList;
+function handleStateUpdate(state) {
+    gamePhase = state.phase;
+    carNames = state.cars;
+    confirmedCars = state.confirmed_cars;
+    votes = state.votes;
 
-    // Ocultar cartel de ganador si se reinicia la lista
-    if (carNames.length === 0) {
-        document.getElementById("winnerBox").style.display = "none";
+    // Update Screens visibility
+    updateScreens();
+
+    // Update Voting Data
+    if (gamePhase === "VOTING") {
+        updateVotingUI();
     }
 
-    // Cargar sprites si no existen
-    carNames.forEach(name => {
+    // Ensure sprites are loaded for confirmed cars
+    updateCarSprites(carNames);
+}
+
+function updateScreens() {
+    // Hide all overlays first
+    Object.values(screens).forEach(el => el.classList.add("hidden"));
+
+    if (gamePhase === "VOTING") {
+        screens.voting.classList.remove("hidden");
+    } else if (gamePhase === "WAITING") {
+        screens.waiting.classList.remove("hidden");
+    } else if (gamePhase === "COUNTDOWN") {
+        screens.countdown.classList.remove("hidden");
+    } else if (gamePhase === "FINISHED") {
+        screens.winner.classList.remove("hidden");
+    }
+    // RACING has no overlay
+}
+
+function updateVotingUI() {
+    for (let car in votes) {
+        const voteCountEl = document.getElementById(`votes-${car}`);
+        const cardEl = document.getElementById(`card-${car}`);
+        if (voteCountEl) voteCountEl.innerText = votes[car];
+
+        if (confirmedCars.includes(car)) {
+            cardEl.classList.add("confirmed");
+        } else {
+            cardEl.classList.remove("confirmed");
+        }
+    }
+}
+
+function handleCountdown(value) {
+    countdownDisplay.innerText = value;
+}
+
+function updatePositions(positions) {
+    for (let name in positions) {
+        if (cars[name]) {
+            cars[name].pos = positions[name];
+        }
+    }
+}
+
+function showWinner(name) {
+    winnerBox.innerHTML = `🏆 GANADOR: ${name.toUpperCase()} 🏆`;
+    // Winner screen is handled by state update normally, but just in case
+    screens.winner.classList.remove("hidden");
+}
+
+// ==========================================
+// GRAPHICS
+// ==========================================
+
+function updateCarSprites(serverList) {
+    serverList.forEach(name => {
         if (!cars[name]) {
             let img = new Image();
-            // Asegúrate de que las imágenes estén en la carpeta /sprites/
             img.src = `sprites/${name}.png`;
             cars[name] = { pos: start_pos, img: img };
         }
     });
 
-    // Limpiar carros viejos
+    // Cleanup
     for (let name in cars) {
-        if (!carNames.includes(name)) delete cars[name];
+        if (!serverList.includes(name)) delete cars[name];
     }
 }
 
-function showWinner(name) {
-    const box = document.getElementById("winnerBox");
-    box.innerHTML = `🏆 GANADOR: ${name.toUpperCase()} 🏆`;
-    box.style.display = "block";
-}
-
-// ==========================================
-// DIBUJAR (LOOP)
-// ==========================================
 function draw() {
-    // Limpiar pantalla
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // 1. Dibujar Pista (Fondo y Líneas)
-    drawTrack();
-
-    // 2. Dibujar Meta
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 10;
-    ctx.setLineDash([20, 20]); // Línea punteada tipo ajedrez
-    ctx.beginPath();
-    ctx.moveTo(finish_line, 0);
-    ctx.lineTo(finish_line, canvas.height);
-    ctx.stroke();
-    ctx.setLineDash([]); // Resetear línea
-
-    // 3. Dibujar Carros
-    if (carNames.length > 0) {
-        // Calcular altura de cada carril dinámicamente
-        let laneHeight = canvas.height / carNames.length;
-
-        carNames.forEach((name, index) => {
-            let car = cars[name];
-            if (!car) return;
-
-            // Calcular Y: Centro del carril
-            let y = (laneHeight * index) + (laneHeight / 2);
-            let x = car.pos;
-
-            drawCar(ctx, car.img, x, y, name);
-        });
+    // Draw Track always if we are past VOTING
+    if (gamePhase !== "VOTING") {
+        drawTrack();
+        drawFinishLine();
+        drawCars();
+    } else {
+         // Optional: Draw background for voting
+         ctx.fillStyle = "#222";
+         ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
     requestAnimationFrame(draw);
 }
 
 function drawTrack() {
-    // Fondo asfalto
     ctx.fillStyle = "#333";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Líneas divisorias de carriles
     if (carNames.length > 1) {
         ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
         ctx.lineWidth = 2;
@@ -193,19 +339,39 @@ function drawTrack() {
     }
 }
 
-function drawCar(ctx, img, x, y, name) {
-    ctx.save();
+function drawFinishLine() {
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 10;
+    ctx.setLineDash([20, 20]);
+    ctx.beginPath();
+    ctx.moveTo(finish_line, 0);
+    ctx.lineTo(finish_line, canvas.height);
+    ctx.stroke();
+    ctx.setLineDash([]);
+}
 
-    // 1. Trasladar al centro del carro
+function drawCars() {
+    if (carNames.length > 0) {
+        let laneHeight = canvas.height / carNames.length;
+
+        carNames.forEach((name, index) => {
+            let car = cars[name];
+            if (!car) return;
+
+            let y = (laneHeight * index) + (laneHeight / 2);
+            let x = car.pos;
+
+            drawCarSprite(ctx, car.img, x, y, name);
+        });
+    }
+}
+
+function drawCarSprite(ctx, img, x, y, name) {
+    ctx.save();
     ctx.translate(x, y);
 
-    // 2. DIBUJAR NOMBRE (Antes de rotar para que quede derecho)
     ctx.fillStyle = "white";
     ctx.font = "bold 14px Arial";
-
-    // CORRECCIÓN DE POSICIÓN DE TEXTO:
-    // Si el carro está muy al inicio (x < 60), alineamos el texto a la izquierda
-    // para que no se corte. Si no, lo centramos.
     if (x < 60) {
         ctx.textAlign = "left";
         ctx.fillText(name.toUpperCase(), -20, -35);
@@ -214,16 +380,12 @@ function drawCar(ctx, img, x, y, name) {
         ctx.fillText(name.toUpperCase(), 0, -35);
     }
 
-    // 3. ROTACIÓN (Girar 180 grados más)
-    // Antes era 90, ahora es 270 (que es lo mismo que -90)
     ctx.rotate(270 * Math.PI / 180);
 
-    // 4. DIBUJAR IMAGEN
     let w = 50;
     let h = 90;
 
     try {
-        // Dibujamos centrado en el punto de rotación
         ctx.drawImage(img, -w/2, -h/2, w, h);
     } catch (e) {
         ctx.fillStyle = "red";
@@ -233,7 +395,6 @@ function drawCar(ctx, img, x, y, name) {
     ctx.restore();
 }
 
-// Iniciar animación
 draw();
 
 </script>
