@@ -2,7 +2,8 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Carrera WebSocket</title>
+    <title>Carrera WebSocket (Phaser)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js"></script>
     <style>
         body {
             background: #222;
@@ -24,7 +25,6 @@
         }
 
         canvas {
-            background: #333;
             display: block;
             border-radius: 4px;
         }
@@ -41,6 +41,12 @@
             align-items: center;
             background: rgba(0,0,0,0.85);
             z-index: 10;
+            pointer-events: none; /* Allow clicks to pass through if needed, though mostly these block interaction */
+        }
+
+        /* Enable pointer events for voting screen so buttons/interactions work */
+        #voting-screen {
+            pointer-events: auto;
         }
 
         .hidden {
@@ -128,7 +134,7 @@
 <body>
 
 <div id="game-container">
-    <canvas id="game" width="1280" height="720"></canvas>
+    <!-- Phaser will inject canvas here automatically if parent is set -->
 
     <!-- Voting Screen -->
     <div id="voting-screen" class="overlay">
@@ -153,10 +159,14 @@
 </div>
 
 <script>
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
+// Assets List
+const allCarNames = [
+    "argentina", "bolivia", "brasil", "chile", "colombia", "costa_rica", "cuba",
+    "ecuador", "el_salvador", "guatemala", "honduras", "mexico", "nicaragua",
+    "panama", "paraguay", "peru", "uruguay", "usa", "venezuela"
+];
 
-// Elements
+// DOM Elements
 const screens = {
     voting: document.getElementById("voting-screen"),
     waiting: document.getElementById("waiting-screen"),
@@ -167,21 +177,38 @@ const votingGrid = document.getElementById("votingGrid");
 const countdownDisplay = document.getElementById("countdownDisplay");
 const winnerBox = document.getElementById("winnerBox");
 
-// Game State
-let cars = {};          // Visual objects
-let carNames = [];      // Order of lanes
-let confirmedCars = [];
-let votes = {};
-let finish_line = 1150;
-let start_pos = 50;
-let gamePhase = "VOTING";
+// Global Game State (Synced with Server)
+let gameState = {
+    phase: "VOTING",
+    cars: [], // list of car names in lanes
+    confirmedCars: [],
+    votes: {}
+};
 
-// Assets
-const allCarNames = [
-    "argentina", "bolivia", "brasil", "chile", "colombia", "costa_rica", "cuba",
-    "ecuador", "el_salvador", "guatemala", "honduras", "mexico", "nicaragua",
-    "panama", "paraguay", "peru", "uruguay", "usa", "venezuela"
-];
+// WebSocket
+let ws = new WebSocket("ws://" + window.location.host + "/ws");
+
+// Phaser Game Configuration
+const config = {
+    type: Phaser.AUTO,
+    width: 1280,
+    height: 720,
+    parent: 'game-container',
+    backgroundColor: '#333333',
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    }
+};
+
+let game = new Phaser.Game(config);
+let sceneContext; // Reference to the scene
+let carSprites = {}; // Map: name -> Sprite
+let trackLines = [];
+let finishLineGraphic;
+let startPos = 50;
+let finishLinePos = 1150;
 
 // Initialize Voting Grid
 allCarNames.forEach(name => {
@@ -198,16 +225,134 @@ allCarNames.forEach(name => {
 });
 
 
-// WebSocket
-let ws = new WebSocket("ws://localhost:8000/ws");
+// Phaser Functions
+function preload() {
+    sceneContext = this;
+    // Load all car images
+    allCarNames.forEach(name => {
+        this.load.image(name, `sprites/${name}.png`);
+    });
+}
 
+function create() {
+    // Create static graphics (track lines, finish line)
+    finishLineGraphic = this.add.graphics();
+
+    // Initial Draw
+    drawTrack(this);
+}
+
+function update() {
+    // Game loop logic if needed (e.g. interpolation), but we are mostly event driven by WS
+}
+
+function drawTrack(scene) {
+    // Clear old graphics
+    if (trackLines.length > 0) {
+        trackLines.forEach(line => line.destroy());
+        trackLines = [];
+    }
+    finishLineGraphic.clear();
+
+    // Draw Finish Line
+    finishLineGraphic.lineStyle(10, 0xffffff, 1);
+    // finish line is a vertical line
+    // Dashed line simulation
+    for (let i = 0; i < 720; i += 40) {
+        finishLineGraphic.lineBetween(finishLinePos, i, finishLinePos, i + 20);
+    }
+
+    // If we have cars, draw lane dividers
+    if (gameState.cars.length > 1) {
+        let laneHeight = 720 / gameState.cars.length;
+
+        for (let i = 1; i < gameState.cars.length; i++) {
+            let y = laneHeight * i;
+            let line = scene.add.graphics();
+            line.lineStyle(2, 0xffffff, 0.3);
+
+            // Dashed horizontal line
+            for (let x = 0; x < 1280; x += 70) {
+                line.lineBetween(x, y, x + 40, y);
+            }
+            trackLines.push(line);
+        }
+    }
+}
+
+// Helper to sync Phaser sprites with Game State
+function updatePhaserCars(positions) {
+    if (!sceneContext) return;
+
+    const currentCarNames = gameState.cars;
+    const laneHeight = 720 / Math.max(1, currentCarNames.length);
+
+    // Add new cars or update existing
+    currentCarNames.forEach((name, index) => {
+        let xPos = positions && positions[name] ? positions[name] : startPos;
+        let yPos = (laneHeight * index) + (laneHeight / 2);
+
+        if (!carSprites[name]) {
+            // Create sprite
+            let sprite = sceneContext.add.sprite(xPos, yPos, name);
+            sprite.angle = 0; // Default facing right if image is facing right.
+            // If original image faces DOWN (as per old code rotate 270), we need to rotate -90 or 270?
+            // Canvas rotate(270 deg) = -90 deg.
+            // If image faces DOWN (90 deg), -90 makes it 0 (Right).
+            // Phaser angle is in degrees.
+            sprite.angle = -90;
+
+            sprite.setDisplaySize(50, 90); // Based on old code w=50, h=90 (swapped because of rotation?)
+            // Wait, drawImage(img, -w/2, -h/2, w, h) where w=50, h=90.
+            // If rotated 270 (-90), the 90 dimension is along X axis? No.
+            // Let's check bounds.
+
+            // Create Text Label
+            let text = sceneContext.add.text(xPos, yPos - 35, name.toUpperCase(), {
+                font: "bold 14px Arial",
+                fill: "#ffffff"
+            });
+            text.setOrigin(0.5, 1);
+
+            carSprites[name] = { sprite: sprite, text: text };
+        }
+
+        // Update Position
+        let carObj = carSprites[name];
+        carObj.sprite.x = xPos;
+        carObj.sprite.y = yPos;
+
+        // Adjust Text position
+        carObj.text.x = xPos;
+        carObj.text.y = yPos - 25; // Offset slightly above
+
+        // Text alignment logic from old code
+        if (xPos < 60) {
+            carObj.text.setOrigin(0, 1);
+            carObj.text.x = xPos - 20;
+        } else {
+            carObj.text.setOrigin(0.5, 1);
+        }
+    });
+
+    // Remove cars that are no longer in the race
+    for (let name in carSprites) {
+        if (!currentCarNames.includes(name)) {
+            carSprites[name].sprite.destroy();
+            carSprites[name].text.destroy();
+            delete carSprites[name];
+        }
+    }
+}
+
+// WebSocket Handling
 ws.onmessage = (event) => {
     let msg = JSON.parse(event.data);
 
     if (msg.type === "state_update") {
         handleStateUpdate(msg);
     } else if (msg.type === "positions") {
-        updatePositions(msg.data);
+        updatePhaserCars(msg.data);
     } else if (msg.type === "countdown") {
         handleCountdown(msg.value);
     } else if (msg.type === "winner") {
@@ -216,46 +361,56 @@ ws.onmessage = (event) => {
 };
 
 function handleStateUpdate(state) {
-    gamePhase = state.phase;
-    carNames = state.cars;
-    confirmedCars = state.confirmed_cars;
-    votes = state.votes;
+    let oldPhase = gameState.phase;
+    let oldCars = gameState.cars.length;
+
+    gameState.phase = state.phase;
+    gameState.cars = state.cars;
+    gameState.confirmedCars = state.confirmed_cars;
+    gameState.votes = state.votes;
 
     // Update Screens visibility
     updateScreens();
 
     // Update Voting Data
-    if (gamePhase === "VOTING") {
+    if (gameState.phase === "VOTING") {
         updateVotingUI();
     }
 
-    // Ensure sprites are loaded for confirmed cars
-    updateCarSprites(carNames);
+    // If cars changed (e.g. waiting phase started), redraw track lines
+    if (gameState.phase === "WAITING" || (gameState.phase === "RACING" && oldPhase !== "RACING")) {
+        if (sceneContext) {
+            drawTrack(sceneContext);
+            updatePhaserCars(); // Initialize sprites at start position
+        }
+    }
+
+    // Ensure sprites exist/removed based on state
+    if (sceneContext) updatePhaserCars();
 }
 
 function updateScreens() {
     // Hide all overlays first
     Object.values(screens).forEach(el => el.classList.add("hidden"));
 
-    if (gamePhase === "VOTING") {
+    if (gameState.phase === "VOTING") {
         screens.voting.classList.remove("hidden");
-    } else if (gamePhase === "WAITING") {
+    } else if (gameState.phase === "WAITING") {
         screens.waiting.classList.remove("hidden");
-    } else if (gamePhase === "COUNTDOWN") {
+    } else if (gameState.phase === "COUNTDOWN") {
         screens.countdown.classList.remove("hidden");
-    } else if (gamePhase === "FINISHED") {
+    } else if (gameState.phase === "FINISHED") {
         screens.winner.classList.remove("hidden");
     }
-    // RACING has no overlay
 }
 
 function updateVotingUI() {
-    for (let car in votes) {
+    for (let car in gameState.votes) {
         const voteCountEl = document.getElementById(`votes-${car}`);
         const cardEl = document.getElementById(`card-${car}`);
-        if (voteCountEl) voteCountEl.innerText = votes[car];
+        if (voteCountEl) voteCountEl.innerText = gameState.votes[car];
 
-        if (confirmedCars.includes(car)) {
+        if (gameState.confirmedCars.includes(car)) {
             cardEl.classList.add("confirmed");
         } else {
             cardEl.classList.remove("confirmed");
@@ -267,135 +422,10 @@ function handleCountdown(value) {
     countdownDisplay.innerText = value;
 }
 
-function updatePositions(positions) {
-    for (let name in positions) {
-        if (cars[name]) {
-            cars[name].pos = positions[name];
-        }
-    }
-}
-
 function showWinner(name) {
     winnerBox.innerHTML = `🏆 GANADOR: ${name.toUpperCase()} 🏆`;
-    // Winner screen is handled by state update normally, but just in case
     screens.winner.classList.remove("hidden");
 }
-
-// ==========================================
-// GRAPHICS
-// ==========================================
-
-function updateCarSprites(serverList) {
-    serverList.forEach(name => {
-        if (!cars[name]) {
-            let img = new Image();
-            img.src = `sprites/${name}.png`;
-            cars[name] = { pos: start_pos, img: img };
-        }
-    });
-
-    // Cleanup
-    for (let name in cars) {
-        if (!serverList.includes(name)) delete cars[name];
-    }
-}
-
-function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Draw Track always if we are past VOTING
-    if (gamePhase !== "VOTING") {
-        drawTrack();
-        drawFinishLine();
-        drawCars();
-    } else {
-         // Optional: Draw background for voting
-         ctx.fillStyle = "#222";
-         ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-
-    requestAnimationFrame(draw);
-}
-
-function drawTrack() {
-    ctx.fillStyle = "#333";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    if (carNames.length > 1) {
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([40, 30]);
-
-        let laneHeight = canvas.height / carNames.length;
-
-        for (let i = 1; i < carNames.length; i++) {
-            let y = laneHeight * i;
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(canvas.width, y);
-            ctx.stroke();
-        }
-        ctx.setLineDash([]);
-    }
-}
-
-function drawFinishLine() {
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 10;
-    ctx.setLineDash([20, 20]);
-    ctx.beginPath();
-    ctx.moveTo(finish_line, 0);
-    ctx.lineTo(finish_line, canvas.height);
-    ctx.stroke();
-    ctx.setLineDash([]);
-}
-
-function drawCars() {
-    if (carNames.length > 0) {
-        let laneHeight = canvas.height / carNames.length;
-
-        carNames.forEach((name, index) => {
-            let car = cars[name];
-            if (!car) return;
-
-            let y = (laneHeight * index) + (laneHeight / 2);
-            let x = car.pos;
-
-            drawCarSprite(ctx, car.img, x, y, name);
-        });
-    }
-}
-
-function drawCarSprite(ctx, img, x, y, name) {
-    ctx.save();
-    ctx.translate(x, y);
-
-    ctx.fillStyle = "white";
-    ctx.font = "bold 14px Arial";
-    if (x < 60) {
-        ctx.textAlign = "left";
-        ctx.fillText(name.toUpperCase(), -20, -35);
-    } else {
-        ctx.textAlign = "center";
-        ctx.fillText(name.toUpperCase(), 0, -35);
-    }
-
-    ctx.rotate(270 * Math.PI / 180);
-
-    let w = 50;
-    let h = 90;
-
-    try {
-        ctx.drawImage(img, -w/2, -h/2, w, h);
-    } catch (e) {
-        ctx.fillStyle = "red";
-        ctx.fillRect(-25, -45, 50, 90);
-    }
-
-    ctx.restore();
-}
-
-draw();
 
 </script>
 
