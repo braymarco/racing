@@ -20,12 +20,16 @@ app.add_middleware(
 # ============================
 # CONFIGURACIÓN
 # ============================
-canvas_width = 1280
-canvas_height = 720
-sprite_width = 50
-start_pos = 650  # Y coordinate near bottom
+canvas_width = 1080
+canvas_height = 1920
+# Dimensions for cars (Configurable)
+CAR_WIDTH = 50
+CAR_HEIGHT = 90
 
-finish_line = 50 # Y coordinate near top
+sprite_width = CAR_WIDTH
+start_pos = 1800  # Y coordinate near bottom
+
+finish_line = 150 # Y coordinate near top
 
 all_cars = [
     "argentina", "bolivia", "brasil", "chile", "colombia", "costa_rica", "cuba",
@@ -60,8 +64,8 @@ clients = set()
 # ============================
 # CONSTANTES FÍSICAS
 # ============================
-finish_line_y = 50    # Coordenada Y visual de la línea de meta
-car_length = 90       # Largo visual aproximado del carro en px
+finish_line_y = 150   # Coordenada Y visual de la línea de meta
+car_length = CAR_HEIGHT       # Largo visual aproximado del carro en px
 car_nose_offset = car_length / 2  # Distancia del centro a la punta
 
 # ============================
@@ -86,7 +90,11 @@ async def broadcast_state():
         "cars": list(game_state.cars.keys()), # Only active cars
         "confirmed_cars": game_state.confirmed_cars,
         "votes": game_state.votes,
-        "winner": game_state.winner
+        "winner": game_state.winner,
+        "config": {
+            "car_width": CAR_WIDTH,
+            "car_height": CAR_HEIGHT
+        }
     }
     await broadcast(state_msg)
 
@@ -233,7 +241,11 @@ async def ws_connection(ws: WebSocket):
         "cars": list(game_state.cars.keys()),
         "confirmed_cars": game_state.confirmed_cars,
         "votes": game_state.votes,
-        "winner": game_state.winner
+        "winner": game_state.winner,
+        "config": {
+            "car_width": CAR_WIDTH,
+            "car_height": CAR_HEIGHT
+        }
     })
 
     try:

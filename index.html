@@ -18,9 +18,16 @@
 
         #game-container {
             position: relative;
-            width: 1280px;
-            height: 720px;
+            width: 1080px;
+            height: 1920px;
             box-shadow: 0 0 50px rgba(0,0,0,0.8);
+            /* Scale to fit screen height */
+            transform-origin: center center;
+            transform: scale(0.45); /* Base scale for 1080p screens */
+        }
+
+        @media (min-height: 1920px) {
+             #game-container { transform: scale(1); }
         }
 
         canvas {
@@ -128,7 +135,7 @@
 <body>
 
 <div id="game-container">
-    <canvas id="game" width="1280" height="720"></canvas>
+    <canvas id="game" width="1080" height="1920"></canvas>
 
     <!-- Voting Screen -->
     <div id="voting-screen" class="overlay">
@@ -172,9 +179,11 @@ let cars = {};          // Visual objects
 let carNames = [];      // Order of lanes
 let confirmedCars = [];
 let votes = {};
-let finish_line = 50;
-let start_pos = 650;
+let finish_line = 150;
+let start_pos = 1800;
 let gamePhase = "VOTING";
+let carWidth = 50;
+let carHeight = 90;
 
 // Assets
 const allCarNames = [
@@ -223,6 +232,12 @@ function handleStateUpdate(state) {
 
     // Update Screens visibility
     updateScreens();
+
+    // Update Config if present
+    if (state.config) {
+        carWidth = state.config.car_width;
+        carHeight = state.config.car_height;
+    }
 
     // Update Voting Data
     if (gamePhase === "VOTING") {
@@ -329,6 +344,9 @@ function drawTrack() {
 
         let laneWidth = canvas.width / carNames.length;
 
+        // Draw solid dividers for all runners
+        ctx.setLineDash([]); // Make solid
+
         for (let i = 1; i < carNames.length; i++) {
             let x = laneWidth * i;
             ctx.beginPath();
@@ -336,7 +354,6 @@ function drawTrack() {
             ctx.lineTo(x, canvas.height);
             ctx.stroke();
         }
-        ctx.setLineDash([]);
     }
 }
 
@@ -400,27 +417,45 @@ function drawCarSprite(ctx, img, x, y, name) {
     ctx.textAlign = "center";
     ctx.fillText(name.toUpperCase(), 0, 60);
 
-    // Rotate to face UP (0 degrees or -90 depending on source)
-    // Original code rotated 270 (facing UP assuming source faces RIGHT)
-    // If source faces RIGHT, 270 (-90) makes it face UP.
-    // So the rotation logic might be correct already if we want it facing UP.
-    // Let's verify. 270 degrees = 3/4 turn. Right -> Down -> Left -> Up. Correct.
-    ctx.rotate(270 * Math.PI / 180);
+    // Rotate to face UP
+    // Source sprite faces DOWN (Spoiler at top, Nose at bottom)
+    // We need to rotate 180 degrees to face UP.
+    ctx.rotate(180 * Math.PI / 180);
 
-    let w = 50;
-    let h = 90;
+    let w = carWidth;
+    let h = carHeight;
 
     try {
         ctx.drawImage(img, -w/2, -h/2, w, h);
     } catch (e) {
         ctx.fillStyle = "red";
-        ctx.fillRect(-25, -45, 50, 90);
+        ctx.fillRect(-w/2, -h/2, w, h);
     }
 
     ctx.restore();
 }
 
 draw();
+
+function resizeGame() {
+    const container = document.getElementById('game-container');
+    const windowHeight = window.innerHeight;
+    const windowWidth = window.innerWidth;
+    const gameHeight = 1920;
+    const gameWidth = 1080;
+
+    // Scale based on height to fit the screen
+    const scaleH = (windowHeight * 0.95) / gameHeight;
+    // Check width too
+    const scaleW = (windowWidth * 0.95) / gameWidth;
+
+    const scale = Math.min(scaleH, scaleW);
+
+    container.style.transform = `scale(${scale})`;
+}
+
+window.addEventListener('resize', resizeGame);
+resizeGame(); // Initial call
 
 </script>
 
