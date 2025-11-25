@@ -20,11 +20,12 @@ app.add_middleware(
 # ============================
 # CONFIGURACIÓN
 # ============================
-canvas_width = 1280
-sprite_width = 50
+canvas_width = 1080
+canvas_height = 1920
+sprite_length = 90
 start_pos = 50
 
-finish_line = canvas_width - sprite_width - start_pos
+finish_line_pos = canvas_height - sprite_length - start_pos - 100
 
 all_cars = [
     "argentina", "bolivia", "brasil", "chile", "colombia", "costa_rica", "cuba",
@@ -59,7 +60,7 @@ clients = set()
 # ============================
 # CONSTANTES FÍSICAS
 # ============================
-finish_line_x = 1150  # Coordenada X visual de la línea de meta
+# finish_line_pos ya definido arriba
 car_length = 90       # Largo visual aproximado del carro en px
 car_nose_offset = car_length / 2  # Distancia del centro a la punta
 
@@ -196,7 +197,7 @@ async def race_loop():
             # CALCULO CLAVE: Posición del centro + mitad del largo = Nariz
             nose_position = c["pos"] + car_nose_offset
 
-            if nose_position >= finish_line_x:
+            if nose_position >= finish_line_pos:
                 winner = name
                 break
 

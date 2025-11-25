@@ -18,12 +18,17 @@
 
         #game-container {
             position: relative;
-            width: 1280px;
-            height: 720px;
+            width: 100vh;
+            height: 100vh;
+            max-width: 1080px;
+            max-height: 1920px;
+            aspect-ratio: 9/16;
             box-shadow: 0 0 50px rgba(0,0,0,0.8);
         }
 
         canvas {
+            width: 100%;
+            height: 100%;
             background: #333;
             display: block;
             border-radius: 4px;
@@ -128,7 +133,7 @@
 <body>
 
 <div id="game-container">
-    <canvas id="game" width="1280" height="720"></canvas>
+    <canvas id="game" width="1080" height="1920"></canvas>
 
     <!-- Voting Screen -->
     <div id="voting-screen" class="overlay">
@@ -172,7 +177,7 @@ let cars = {};          // Visual objects
 let carNames = [];      // Order of lanes
 let confirmedCars = [];
 let votes = {};
-let finish_line = 1150;
+let finish_line_pos = 1680; // 1920 - 90 - 50 - 100 approx. Should match server.
 let start_pos = 50;
 let gamePhase = "VOTING";
 
@@ -326,13 +331,13 @@ function drawTrack() {
         ctx.lineWidth = 2;
         ctx.setLineDash([40, 30]);
 
-        let laneHeight = canvas.height / carNames.length;
+        let laneWidth = canvas.width / carNames.length;
 
         for (let i = 1; i < carNames.length; i++) {
-            let y = laneHeight * i;
+            let x = laneWidth * i;
             ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(canvas.width, y);
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
             ctx.stroke();
         }
         ctx.setLineDash([]);
@@ -343,23 +348,30 @@ function drawFinishLine() {
     ctx.strokeStyle = "#fff";
     ctx.lineWidth = 10;
     ctx.setLineDash([20, 20]);
+    // Finish line at top (small Y)
+    // Server logic: finish_line_pos is distance from start.
+    // If cars move UP: Y = canvas.height - pos.
+    // Finish Y = canvas.height - finish_line_pos.
+    let finishY = canvas.height - finish_line_pos;
+
     ctx.beginPath();
-    ctx.moveTo(finish_line, 0);
-    ctx.lineTo(finish_line, canvas.height);
+    ctx.moveTo(0, finishY);
+    ctx.lineTo(canvas.width, finishY);
     ctx.stroke();
     ctx.setLineDash([]);
 }
 
 function drawCars() {
     if (carNames.length > 0) {
-        let laneHeight = canvas.height / carNames.length;
+        let laneWidth = canvas.width / carNames.length;
 
         carNames.forEach((name, index) => {
             let car = cars[name];
             if (!car) return;
 
-            let y = (laneHeight * index) + (laneHeight / 2);
-            let x = car.pos;
+            let x = (laneWidth * index) + (laneWidth / 2);
+            // Move UP: y decreases as pos increases
+            let y = canvas.height - car.pos;
 
             drawCarSprite(ctx, car.img, x, y, name);
         });
@@ -372,15 +384,14 @@ function drawCarSprite(ctx, img, x, y, name) {
 
     ctx.fillStyle = "white";
     ctx.font = "bold 14px Arial";
-    if (x < 60) {
-        ctx.textAlign = "left";
-        ctx.fillText(name.toUpperCase(), -20, -35);
-    } else {
-        ctx.textAlign = "center";
-        ctx.fillText(name.toUpperCase(), 0, -35);
-    }
+    ctx.textAlign = "center";
+    ctx.fillText(name.toUpperCase(), 0, -50); // Text above car
 
-    ctx.rotate(270 * Math.PI / 180);
+    // Rotate to face UP.
+    // Assuming original sprites face DOWN (if 270->Right).
+    // To face UP (270/-90 in std coordinates, or just visual UP on screen),
+    // If we want visual UP, and sprite is DOWN (90), we rotate 180.
+    ctx.rotate(180 * Math.PI / 180);
 
     let w = 50;
     let h = 90;
