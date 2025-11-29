@@ -147,6 +147,21 @@ async def start_sequence():
     await broadcast_state()
     asyncio.create_task(race_loop())
 
+@app.get("/move/{car}")
+async def move_car(car: str):
+    if game_state.phase != GamePhase.RACING:
+        return {"error": "Race is not in progress"}
+
+    if car not in game_state.cars:
+        return {"error": "Car not in race"}
+
+    c = game_state.cars[car]
+    # Formula: c["pos"] += c["vel"] + random.randint(1, 20) / 10
+    increment = c["vel"] + random.randint(1, 20) / 10
+    c["pos"] += increment
+
+    return {"status": "moved", "car": car, "new_pos": c["pos"], "increment": increment}
+
 @app.get("/hard_reset")
 async def hard_reset():
     global game_state

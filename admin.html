@@ -67,6 +67,14 @@
         </div>
     </div>
 
+    <div class="control-group">
+        <h2>Race Controls (Boost/Move)</h2>
+        <p>Click to move a car (Only works during RACING phase).</p>
+        <div class="grid" id="moveGrid">
+            <!-- Buttons injected by JS -->
+        </div>
+    </div>
+
     <div class="status-log" id="log">Log initialized...</div>
 
     <script>
@@ -93,6 +101,16 @@
                 btn.onclick = () => vote(car);
                 grid.appendChild(btn);
             });
+
+            const moveGrid = document.getElementById('moveGrid');
+            cars.forEach(car => {
+                const btn = document.createElement('button');
+                btn.className = 'btn-vote'; // Reuse style or add new one
+                btn.style.backgroundColor = '#28a745'; // Green for move
+                btn.textContent = `Move ${car.toUpperCase()}`;
+                btn.onclick = () => move(car);
+                moveGrid.appendChild(btn);
+            });
         }
 
         async function vote(car) {
@@ -105,6 +123,20 @@
                      log(`Info: ${data.message}`);
                 } else {
                     log(`Voted ${car}. Total: ${data.votes}. Confirmed: ${data.confirmed}`);
+                }
+            } catch (e) {
+                log(`Network error: ${e}`);
+            }
+        }
+
+        async function move(car) {
+            try {
+                const res = await fetch(`/move/${car}`);
+                const data = await res.json();
+                if (data.error) {
+                    log(`Error moving ${car}: ${data.error}`);
+                } else {
+                    log(`Moved ${car}. New Pos: ${data.new_pos.toFixed(2)} (+${data.increment.toFixed(2)})`);
                 }
             } catch (e) {
                 log(`Network error: ${e}`);
