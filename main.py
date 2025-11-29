@@ -183,7 +183,7 @@ async def race_loop():
         # Actualizar física (Mover carros)
         for c in game_state.cars.values():
             # Aumentamos la velocidad base para que no sea tan lento
-            c["pos"] += c["vel"] + random.randint(1, 20) / 10
+            #c["pos"] += c["vel"] + random.randint(1, 20) / 10
             c["vel"] = max(1, c["vel"] - 0.05)
 
         # Detectar ganador usando la PUNTA del carro
